@@ -10,8 +10,14 @@ async def get_revenue_summary(property_id: str, tenant_id: str) -> Dict[str, Any
     """
     Fetches revenue summary, utilizing caching to improve performance.
     """
-    cache_key = f"revenue:{property_id}"
-    
+    # The cache key MUST include the tenant. property_id is not globally
+    # unique: properties has PRIMARY KEY (id, tenant_id), so the same id can
+    # belong to two different tenants (e.g. prop-001 is both Sunset's
+    # "Beach House Alpha" and Ocean's "Mountain Lodge Beta"). Keying on
+    # property_id alone let whichever tenant warmed the key serve their
+    # revenue to every other tenant for the full TTL.
+    cache_key = f"revenue:{tenant_id}:{property_id}"
+
     # Try to get from cache
     cached = await redis_client.get(cache_key)
     if cached:
