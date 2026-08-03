@@ -4,6 +4,10 @@ Minimal tenant resolver for authentication.
 from typing import Optional
 import logging
 
+from jose import JWTError, jwt
+
+from ..config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,27 +73,45 @@ class TenantResolver:
         return None
 
     @staticmethod
-    async def resolve_tenant_id(user_id: str, user_email: str, token: Optional[str] = None) -> str:
+    async def resolve_tenant_id(
+        user_id: str, user_email: str, token: Optional[str] = None
+    ) -> Optional[str]:
         """
-        Resolve tenant ID for a user.
-        
-        Args:
-            user_id: User ID
-            user_email: User email
-            
-        Returns:
-            Tenant ID
+        Resolve the tenant ID for a user.
+
+        Returns None when the tenant cannot be established. Callers must
+        treat that as "no access", never as a default tenant.
         """
-        # Fallback mapping by known user email.
-        if user_email == "sunset@propertyflow.com":
-            return "tenant-a"
-        if user_email == "ocean@propertyflow.com":
-            return "tenant-b"
-        if user_email == "candidate@propertyflow.com":
-            return "tenant-a"
-            
-        # Default fallback
-        return "tenant-a"
+        # The token is the authority: it is signed, and the tenant claim was
+        # put there at login. Prefer it over any local mapping.
+        if token:
+            try:
+                payload = jwt.decode(
+                    token,
+                    settings.secret_key,
+                    algorithms=["HS256"],
+                    audience="authenticated",
+                )
+                tenant_id = TenantResolver.resolve_tenant_from_token(payload)
+                if tenant_id:
+                    return tenant_id
+            except JWTError as exc:
+                logger.warning(f"Could not read tenant claim from token: {exc}")
+
+        # Fallback mapping by known user email, for tokens issued before the
+        # claim was populated.
+        known_tenants = {
+            "sunset@propertyflow.com": "tenant-a",
+            "ocean@propertyflow.com": "tenant-b",
+            "candidate@propertyflow.com": "tenant-a",
+        }
+        if user_email in known_tenants:
+            return known_tenants[user_email]
+
+        # Fail closed. Defaulting here would hand an unrecognised user a real
+        # tenant's data.
+        logger.warning(f"Could not resolve a tenant for user {user_email!r}; denying access")
+        return None
 
     @staticmethod
     async def update_user_tenant_metadata(user_id: str, tenant_id: str) -> None:

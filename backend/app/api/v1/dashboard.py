@@ -43,8 +43,13 @@ async def get_dashboard_summary(
     current_user: dict = Depends(get_current_user)
 ) -> Dict[str, Any]:
     
-    tenant_id = getattr(current_user, "tenant_id", "default_tenant") or "default_tenant"
-    
+    # An unresolved tenant is an authorisation failure, not a value to
+    # substitute. Falling back to a shared placeholder previously put every
+    # such user in one bucket - which is also a shared cache namespace.
+    tenant_id = getattr(current_user, "tenant_id", None)
+    if not tenant_id:
+        raise HTTPException(status_code=403, detail="No tenant associated with this user")
+
     revenue_data = await get_revenue_summary(property_id, tenant_id)
 
     # total_revenue is serialised as a decimal string, not a JSON number.
